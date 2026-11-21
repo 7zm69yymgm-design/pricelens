@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>PriceLens</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8; --accent:#22c55e; --blue:#38bdf8; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  #app { position:fixed; inset:0; display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; padding-top:max(12px, env(safe-area-inset-top)); }
+  header h1 { font-size:18px; margin:0; }
+  select { background:var(--card); color:var(--text); border:1px solid #334155; border-radius:10px; padding:8px 10px; font-size:14px; }
+  #camwrap { position:relative; flex:1; min-height:0; background:#000; overflow:hidden; }
+  video { width:100%; height:100%; object-fit:cover; display:block; }
+  .frame { position:absolute; left:50%; top:50%; width:70%; aspect-ratio:1; transform:translate(-50%,-50%); border:3px solid rgba(255,255,255,.85); border-radius:24px; box-shadow:0 0 0 999px rgba(0,0,0,.35); pointer-events:none; }
+  #msg { position:absolute; left:16px; right:16px; top:50%; transform:translateY(-50%); text-align:center; color:var(--muted); font-size:15px; display:none; }
+  footer { padding:16px; padding-bottom:max(16px, env(safe-area-inset-bottom)); display:flex; justify-content:center; }
+  #scan { width:76px; height:76px; border-radius:50%; border:5px solid #fff; background:var(--accent); font-size:0; box-shadow:0 4px 14px rgba(0,0,0,.4); }
+  #scan:active { transform:scale(.94); }
+  #scan:disabled { background:#475569; }
+  #sheet { position:fixed; left:0; right:0; bottom:0; top:12%; background:var(--bg); border-radius:22px 22px 0 0; box-shadow:0 -8px 30px rgba(0,0,0,.5); transform:translateY(105%); transition:transform .3s ease; overflow-y:auto; padding:16px; padding-bottom:max(24px, env(safe-area-inset-bottom)); z-index:5; }
+  #sheet.open { transform:translateY(0); }
+  .close { position:sticky; top:0; float:right; background:var(--card); color:var(--text); border:0; border-radius:50%; width:36px; height:36px; font-size:18px; }
+  .name { font-size:20px; font-weight:700; margin:4px 0; padding-right:44px; }
+  .meta { color:var(--muted); font-size:14px; margin-bottom:10px; }
+  .desc { font-size:15px; line-height:1.5; margin:8px 0; }
+  ul.feat { padding-left:18px; margin:8px 0 14px; color:#cbd5e1; font-size:14px; line-height:1.6; }
+  h2 { font-size:16px; margin:18px 0 8px; }
+  .note { background:#422006; color:#fed7aa; padding:10px 12px; border-radius:10px; font-size:13px; margin:8px 0; }
+  .offer { display:flex; gap:12px; align-items:center; background:var(--card); border-radius:14px; padding:10px; margin-bottom:10px; text-decoration:none; color:var(--text); border:2px solid transparent; }
+  .offer.best { border-color:var(--accent); }
+  .offer img { width:56px; height:56px; object-fit:contain; background:#fff; border-radius:10px; flex:none; }
+  .offer .info { flex:1; min-width:0; }
+  .offer .store { font-weight:600; font-size:15px; }
+  .offer .title { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .offer .price { font-weight:700; font-size:16px; color:var(--blue); white-space:nowrap; }
+  .best .price { color:var(--accent); }
+  .badge { display:inline-block; background:var(--accent); color:#052e16; font-size:11px; font-weight:700; padding:2px 7px; border-radius:999px; margin-left:6px; }
+  .loading { text-align:center; padding:40px 0; color:var(--muted); }
+  .spinner { width:36px; height:36px; border:4px solid #334155; border-top-color:var(--accent); border-radius:50%; margin:0 auto 14px; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .err { background:#450a0a; color:#fecaca; padding:12px; border-radius:12px; font-size:14px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>PriceLens</h1>
+    <select id="country" aria-label="Country">
+      <option value="">Auto country</option>
+      <option value="pk">Pakistan</option>
+      <option value="us">United States</option>
+      <option value="gb">United Kingdom</option>
+      <option value="ae">UAE</option>
+      <option value="sa">Saudi Arabia</option>
+      <option value="in">India</option>
+      <option value="ca">Canada</option>
+      <option value="au">Australia</option>
+      <option value="de">Germany</option>
+    </select>
+  </header>
+
+  <div id="camwrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="frame"></div>
+    <div id="msg"></div>
+  </div>
+
+  <footer>
+    <button id="scan" aria-label="Scan product">Scan</button>
+  </footer>
+</div>
+
+<div id="sheet">
+  <button class="close" id="closeSheet" aria-label="Close">&times;</button>
+  <div id="result"></div>
+</div>
+
+<canvas id="canvas" hidden></canvas>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const scanBtn = document.getElementById('scan');
+const sheet = document.getElementById('sheet');
+const resultEl = document.getElementById('result');
+const msg = document.getElementById('msg');
+const countrySel = document.getElementById('country');
+
+try { const saved = localStorage.getItem('country'); if (saved) countrySel.value = saved; } catch (e) {}
+countrySel.addEventListener('change', () => { try { localStorage.setItem('country', countrySel.value); } catch (e) {} });
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+function safeUrl(u) { return /^https?:\/\//i.test(u || '') ? u : '#'; }
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } },
+      audio: false
+    });
+    video.srcObject = stream;
+  } catch (e) {
+    msg.style.display = 'block';
+    msg.textContent = 'Camera nahi khul saka. Browser ki settings mein camera ki ijazat do aur page dobara kholo.';
+    scanBtn.disabled = true;
+  }
+}
+
+function openSheet() { sheet.classList.add('open'); }
+function closeSheet() { sheet.classList.remove('open'); }
+document.getElementById('closeSheet').addEventListener('click', closeSheet);
+
+function captureFrame() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  const side = Math.min(vw, vh) * 0.85; // centre crop
+  const sx = (vw - side) / 2, sy = (vh - side) / 2;
+  const out = Math.min(800, side);
+  canvas.width = out; canvas.height = out;
+  canvas.getContext('2d').drawImage(video, sx, sy, side, side, 0, 0, out, out);
+  return canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+}
+
+scanBtn.addEventListener('click', async () => {
+  const image = captureFrame();
+  if (!image) return;
+  scanBtn.disabled = true;
+  resultEl.innerHTML = '<div class="loading"><div class="spinner"></div>Product pehchana ja raha hai...</div>';
+  openSheet();
+  try {
+    const r = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image, country: countrySel.value })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Kuch masla aa gaya');
+    render(data);
+  } catch (e) {
+    resultEl.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+  } finally {
+    scanBtn.disabled = false;
+  }
+});
+
+function render(d) {
+  const p = d.product;
+  let html = '<div class="name">' + esc(p.name) + '</div>';
+  html += '<div class="meta">' + esc([p.brand, p.category].filter(Boolean).join(' • ')) + '</div>';
+  if (p.description) html += '<div class="desc">' + esc(p.description) + '</div>';
+  if (p.key_features && p.key_features.length) {
+    html += '<ul class="feat">' + p.key_features.map(f => '<li>' + esc(f) + '</li>').join('') + '</ul>';
+  }
+  html += '<h2>Prices (' + esc(String(d.country || '').toUpperCase()) + ')</h2>';
+  if (d.note) html += '<div class="note">' + esc(d.note) + '</div>';
+  if (!d.offers.length) {
+    html += '<div class="note">Is product ki koi price nahi mili. Dobara scan karke dekho.</div>';
+  }
+  d.offers.forEach((o, i) => {
+    html += '<a class="offer' + (i === 0 ? ' best' : '') + '" href="' + esc(safeUrl(o.link)) + '" target="_blank" rel="noopener noreferrer">'
+      + (o.thumbnail ? '<img src="' + esc(safeUrl(o.thumbnail)) + '" alt="">' : '')
+      + '<div class="info"><div class="store">' + esc(o.store) + (i === 0 ? '<span class="badge">LOWEST</span>' : '') + '</div>'
+      + '<div class="title">' + esc(o.title) + '</div></div>'
+      + '<div class="price">' + esc(o.price) + '</div></a>';
+  });
+  resultEl.innerHTML = html;
+}
+
+startCamera();
+</script>
+</body>
+</html>
